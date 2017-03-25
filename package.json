@@ -1,6 +1,6 @@
 {
   "name": "redomx",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "A transpiler which replaces HTML with Redom Code",
   "main": "main.js",
   "scripts": {

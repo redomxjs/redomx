@@ -29,6 +29,7 @@
   "homepage": "https://github.com/redomxjs/redomx#readme",
   "dependencies": {
     "indent-string": "^3.1.0",
+    "jsesc": "^2.4.0",
     "lodash": "^4.17.4",
     "parse5": "^3.0.2"
   },

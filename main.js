@@ -1,6 +1,9 @@
 var parse5 = require('parse5')
 var _ = require('lodash')
 var indentString = require('indent-string')
+var jsesc = require('jsesc')
+
+var redomNS = 'redom.'
 
 var isJSValue = function(value) {
   return _.startsWith(value, '{')
@@ -18,9 +21,13 @@ var filterJSValue = function(value) {
   }
 }
 
-var compileNodes = function(indentBase, indent, nodes, separator, idx, svg) {
-  if (idx === undefined) {
+var compileNodes = function(indentBase, indent, nodes, separator, parent_result, svg) {
+  if (parent_result === undefined) {
     idx = -1
+    parent_result = {}
+  }
+  if (separator === undefined || nodes.length < 2) {
+    separator = ''
   }
 
   indent += '  '
@@ -31,13 +38,10 @@ var compileNodes = function(indentBase, indent, nodes, separator, idx, svg) {
       tree: ''
     },
     update: '',
+    classes: parent_result.classes || [],
     nodes: [],
     nodesWithIfRT: false,
-    idx: idx
-  }
-
-  if (nodes.length < 2) {
-    separator = ''
+    idx: parent_result.idx || idx
   }
 
   var compiledNodes = _.map(nodes, function (v, k) {
@@ -48,8 +52,10 @@ var compileNodes = function(indentBase, indent, nodes, separator, idx, svg) {
     node.definition = ''
     node.update = ''
     node.attrsRender = ''
+    node.for = false
     node.if = false
     node.ifRT = false
+    node.raw = false
     node.svg = (svg || v.tagName === 'svg')
     _.each(v.attrs, function (attr) {
       attr.value = _.trim(attr.value)
@@ -63,6 +69,23 @@ var compileNodes = function(indentBase, indent, nodes, separator, idx, svg) {
 
       if (_.startsWith(attr.name, 'on')) {
         attr.value = '() => { ' + attr.value + ' }'
+      } else if (attr.name == 'r-for') {
+        var regex = /\(?([_a-zA-Z0-9]*)(?:.*?,.*?([_a-zA-Z0-9]*?))?\)? in (.*).*?/
+        var match = attr.value.match(regex)
+        node.for = node.for || {}
+        node.for.valueName = match[1]
+        node.for.keyName = match[2]
+        node.for.in = match[3]
+        attrRender = false
+      } else if (attr.name == 'r-for-id') {
+        node.for = node.for || {}
+        node.for.id = attr.value
+        attrRender = false
+      } else if (attr.name == 'r-raw') {
+        attr.name = 'innerHTML'
+        var rawHTML = jsesc(_.trim(parse5.serialize(v)))
+        attr.value = `'${rawHTML}'`
+        node.raw = true
       } else if (attr.name == 'r-svg') {
         attrRender = false
         node.svg = true
@@ -74,9 +97,10 @@ var compileNodes = function(indentBase, indent, nodes, separator, idx, svg) {
         node.if = attr.value
         attrRender = false
       } else if (attrRT) {
-        node.update += `\n${indentBase}  Redom.setAttr(this.view[${result.idx}], '${attr.name}', ${attr.value})`
+        node.update += `\n${indentBase}  ${redomNS}setAttr(this.view[${result.idx}], '${attr.name}', ${attr.value})`
       } else if (_.startsWith(attr.name, '@')) {
-        node.listing += `this.view['${attr.name.substring(1)}'] = `
+        node.name = attr.name.substring(1)
+        node.listing += `this.view['${node.name}'] = `
         attrRender = false
       } else {
         attr.value = `'${attr.value}'`
@@ -90,6 +114,7 @@ var compileNodes = function(indentBase, indent, nodes, separator, idx, svg) {
         node.attrsRender += `\n${indent}  ${prefix}'${attr.name}': ${attr.value}`
       }
     })
+
     var value = _.trim(v.value)
     var valueJS = isJSValue(value)
     var valueRT = isJSRealtime(value)
@@ -97,33 +122,56 @@ var compileNodes = function(indentBase, indent, nodes, separator, idx, svg) {
       value = filterJSValue(value)
     }
     value = _.trim(value)
-    if (v.nodeName === '#text') {
+    if (node.for) {
+      var itemClassResult = ''
+      var itemClassName = (node.name && node.name != '')? `${_.capitalize(node.name)}Item`: false
+      var itemClassId = result.classes.length
+      var itemClassListingById = `this.viewClasses[${itemClassId}]`
+      var itemClassListingByName = (itemClassName)? `this.viewClasses['${itemClassName}']`: false
+
+      // Class setup
+      var comp = compileNodes('  ', '  ', v.childNodes)
+      var childModule = createModuleBody('  ', comp, 'constructor() {', `update (${node.for.valueName}${(node.for.keyName)? ", " + node.for.keyName: ''}) {`)
+      itemClassResult = `${itemClassListingById} = class {
+${childModule}
+}`
+
+      if (itemClassListingByName) {
+        itemClassResult += `\n${itemClassListingByName} = ${itemClassListingById}`
+      }
+      result.classes.push(itemClassResult)
+      node.update += `\n${indentBase}  ${node.listingById}.update(${node.for.in})`
+      node.definition += `(() => { var element = ${redomNS}list('${v.tagName}', ${itemClassListingById}${ (node.for.id)? ', \'' + node.for.id + '\'': '' }); ${redomNS}setAttr(element, { ${node.attrsRender} }); return element })()`
+    } else if (v.nodeName === '#text') {
       if (valueRT) {
         node.update += `\n${indentBase}  this.view[${result.idx}].textContent = ${value}`
-        node.definition += `Redom.text(${value})`
+        node.definition += `${redomNS}text('')`
       } else if (valueJS) {
-        node.definition += `Redom.text(${value})`
+        node.definition += `${redomNS}text(${value})`
       } else {
-        node.definition += `Redom.text(\` ${value}\`)`
+        node.definition += `${redomNS}text(\` ${value}\`)`
       }
     } else {
-      node.definition += `Redom.${ (node.svg)? 'svg': 'el' }('${v.tagName}', {`
+      node.definition += `${redomNS}${ (node.svg)? 'svg': 'el' }('${v.tagName}', {`
       node.definition += node.attrsRender
       node.definition += `\n${indent}}, [\n`
-      var childResult = compileNodes(indentBase, indent, v.childNodes, ',', result.idx, node.svg)
-      node.definition += childResult.render.tree
-      if (childResult.nodesWithIfRT) {
-        var childListings = _.join(_.map(childResult.nodes, function (childNode) {
-          if (childNode.ifRT) {
-            return `((${childNode.if})? ${childNode.listingById}: null)`
-          } else {
-            return childNode.listingById
-          }
-        }), `,\n${indent}  `)
-        node.update += `\n${indent}Redom.setChildren(${node.listingById}, [\n${indent}  ${childListings}\n${indent}])`
+      if (!node.raw) {
+        var childResult = compileNodes(indentBase, indent, v.childNodes, ',', result, node.svg)
+        node.definition += childResult.render.tree
+        if (childResult.nodesWithIfRT) {
+          var childListings = _.join(_.map(childResult.nodes, function (childNode) {
+            if (childNode.ifRT) {
+              return `((${childNode.if})? ${childNode.listingById}: null)`
+            } else {
+              return childNode.listingById
+            }
+          }), `,\n${indent}  `)
+          node.update += `\n${indent}${redomNS}setChildren(${node.listingById}, [\n${indent}  ${childListings}\n${indent}])`
+        }
+        node.update += childResult.update
+        result.classes = childResult.classes
+        result.idx = childResult.idx
       }
-      node.update += childResult.update
-      result.idx = childResult.idx
       node.definition += `${indent}])`
     }
 
@@ -152,22 +200,26 @@ ${indentBase}  }`
   return result;
 }
 
+var createModuleBody = function(indentBase, comp, templateFn, updateFn, afterCreate) {
+  return `${indentBase}${templateFn}
+${indentBase}  this.view = {}
+${indentBase}  this.viewClasses = {}
+${indentString(comp.classes.join('\n'), indentBase.length + 2)}
+${comp.render.definitions}
+${comp.render.tree}
+${indentBase}  this.el = this.view.el${ (afterCreate)? '\n' + indentBase + '  ' + afterCreate: ''}
+${indentBase}}
+${indentBase}${updateFn}${comp.update}
+${indentBase}}`
+}
+
 module.exports = function redomx ( code ) {
-  var regex = /^((.*?)template.?\(.*?\).?{)[\S\s]*?(<[\S\s]*>)[\S\s]*?(\2})$/gm
+  var regex = /^(.*?)(template.?\(.*?\).?{)[\S\s]*?(<[\S\s]*>)[\S\s]*?(\1})$/gm
 
   code = code.replace(regex, function (gm, m1, m2, m3, m4) {
     var htmlTree = parse5.parseFragment(m3)
-    var comp = compileNodes(m2, m2, htmlTree.childNodes)
-
-    var result = `${m1}
-${m2}  this.view = {}
-${comp.render.definitions}
-${comp.render.tree}
-${m2}  this.el = this.view.el
-${m2}  this.update()
-${m2}}
-${m2}update () {${comp.update}
-${m2}}`
+    var comp = compileNodes(m1, m1, htmlTree.childNodes)
+    var result = createModuleBody(m1, comp, m2, 'update () {', 'this.update()')
     return result
   })
 

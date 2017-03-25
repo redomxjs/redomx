@@ -59,6 +59,7 @@ var compileNodes = function(indentBase, indent, nodes, separator, idx, svg) {
       if (attrJS) {
         attr.value = filterJSValue(attr.value)
       }
+      attr.value = _.trim(attr.value)
 
       if (_.startsWith(attr.name, 'on')) {
         attr.value = '() => { ' + attr.value + ' }'
@@ -95,6 +96,7 @@ var compileNodes = function(indentBase, indent, nodes, separator, idx, svg) {
     if (valueJS) {
       value = filterJSValue(value)
     }
+    value = _.trim(value)
     if (v.nodeName === '#text') {
       if (valueRT) {
         node.update += `\n${indentBase}  this.view[${result.idx}].textContent = ${value}`
@@ -117,8 +119,8 @@ var compileNodes = function(indentBase, indent, nodes, separator, idx, svg) {
           } else {
             return childNode.listingById
           }
-        }), `, \n${indent}  `)
-        node.update += `\n${indent}Redom.setChildren(${node.listingById}, [ \n${indent}  ${childListings}\n${indent}])`
+        }), `,\n${indent}  `)
+        node.update += `\n${indent}Redom.setChildren(${node.listingById}, [\n${indent}  ${childListings}\n${indent}])`
       }
       node.update += childResult.update
       result.idx = childResult.idx

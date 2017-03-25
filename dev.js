@@ -7,4 +7,4 @@ var html = fs.readFileSync('./dev-input.js', 'utf-8')
 
 var result = redomx(html)
 
-console.log(result)
+console.log(result.code)

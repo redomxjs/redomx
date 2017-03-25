@@ -169,5 +169,7 @@ ${m2}}`
     return result
   })
 
-  return code
+  return {
+    code: code
+  }
 }

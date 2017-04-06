@@ -4,7 +4,9 @@
   "description": "A transpiler which replaces HTML with Redom Code",
   "main": "main.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build:nearley": "./node_modules/.bin/nearleyc ./grammar/main.nearley -o ./grammar/main.js",
+    "nearley:unparse": "./node_modules/.bin/nearley-unparse ./grammar/main.js"
   },
   "repository": {
     "type": "git",
@@ -28,6 +30,7 @@
   },
   "homepage": "https://github.com/redomxjs/redomx#readme",
   "dependencies": {
+    "nearley": "^2.8.0",
     "indent-string": "^3.1.0",
     "jsesc": "^2.4.0",
     "lodash": "^4.17.4",
